@@ -1,5 +1,6 @@
 use std::{
   collections::HashMap,
+  net::IpAddr,
   sync::{Arc, Mutex},
 };
 //use futures::{pin_mut, StreamExt};
@@ -71,6 +72,7 @@ struct SecurityConfig {
 /// Builder for configuring a `Context`
 pub struct ContextOptions {
   domain_id: u16,
+  only_networks: Option<Vec<IpAddr>>,
   #[cfg(feature = "security")]
   security_config: Option<SecurityConfig>,
 }
@@ -79,6 +81,7 @@ impl ContextOptions {
   pub fn new() -> Self {
     Self {
       domain_id: 0,
+      only_networks: None,
       #[cfg(feature = "security")]
       security_config: None,
     }
@@ -91,6 +94,21 @@ impl ContextOptions {
   /// or DDS documentation.
   pub fn domain_id(mut self, domain_id: u16) -> Self {
     self.domain_id = domain_id;
+    self
+  }
+
+  /// Restrict which local network interfaces are used for multicast and
+  /// advertised in discovery.
+  ///
+  /// When set, only interfaces whose IP address appears in `addrs` are used
+  /// for multicast joins, multicast sends, and unicast locator advertisement.
+  /// This is useful for forcing ROS 2 traffic onto a specific network (for
+  /// example a robot's private LAN) when the host has multiple interfaces.
+  ///
+  /// This is not a hard transport-level ACL: unicast sockets still bind to
+  /// wildcard addresses for the selected ports.
+  pub fn with_only_networks(mut self, addrs: impl IntoIterator<Item = impl Into<IpAddr>>) -> Self {
+    self.only_networks = Some(addrs.into_iter().map(Into::into).collect());
     self
   }
 
@@ -138,8 +156,11 @@ impl Context {
 
   /// Create a new Context.
   pub fn with_options(opt: ContextOptions) -> CreateResult<Context> {
-    #[allow(unused_mut)] // only mutated with security
     let mut dpb = DomainParticipantBuilder::new(opt.domain_id);
+
+    if let Some(networks) = opt.only_networks {
+      dpb = dpb.with_only_networks(networks);
+    }
 
     #[cfg(feature = "security")]
     {
